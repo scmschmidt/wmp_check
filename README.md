@@ -106,7 +106,7 @@ WMP will not work properly!
 
 ## Changelog
 
-|    date    | version  | comment                                     |
-|------------|----------|---------------------------------------------|
-| 12.10.2020 | v1.0     | First release.                              |
-
+|    date    | version  | comment                                               |
+|------------|----------|-------------------------------------------------------|
+| 12.10.2020 | v1.0     | First release.                                        |
+| 13.10.2020 | v1.0.1   | Added check of memory.low=max for SAP.slice children. |

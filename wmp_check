@@ -25,9 +25,10 @@
 #
 # Changelog:
 #
-# 12.10.2020  v0.1      First release.
+# 12.10.2020  v1.0      First release.
+# 13.10.2020  v1.0.1    Added check of memory.low=max for SAP.slice children.
 
-version="1.0"
+version="1.0.1"
 
 # We use these global arrays through out the program:
 #
@@ -197,6 +198,8 @@ function get_SAP_slice_data() {
     #
     # Requires: -
 
+    local path error
+
     SAP_slice_data['name']='SAP.slice'
 
     if systemctl cat "${SAP_slice_data['name']}" > /dev/null 2>&1 ; then
@@ -208,6 +211,23 @@ function get_SAP_slice_data() {
         SAP_slice_data['memory.low']=${SAP_slice_data['memory.low']:=0}
         SAP_slice_data['memory.current']=$(cat "/sys/fs/cgroup/${SAP_slice_data['name']}/memory.current" 2>/dev/null)
         SAP_slice_data['memory.current']=${SAP_slice_data['memory.current']:=0}
+
+        error=0
+        while read path ; do 
+            if [ -e "${path}/memory.low" ] ; then
+                ((error++))
+                continue
+            fi
+            if [ "$(< ${path}/memory.low)" != 'max' ] ; then
+                ((error++))
+                continue
+            fi 
+        done < <(find "/sys/fs/cgroup/${SAP_slice_data['name']}/" -mindepth 1 -type d)
+        if [ ${error} -ne 0 ] ; then 
+            SAP_slice_data['memory_low_children']='ok'
+        else
+            SAP_slice_data['memory_low_children']='false'
+        fi
     else
         SAP_slice_data['exists']='no'
     fi
@@ -508,6 +528,12 @@ function check_wmp() {
                     ((fails++))
                     ;;
             esac
+            case "${SAP_slice_data['memory_low_children']}" in 
+                false)
+                    print_fail "Subcgroups of ${SAP_slice_data['name']} have either no MemoryLow setting or are not set to maximum!" "Check what has changed the parameters and restart the SAP instances."
+                    ((fails++))
+                    ;;
+            esac
             ;;
         no) 
             print_fail "Unit file for ${SAP_slice_data['name']} is missing!" "Reinstall the sapwmp package."
@@ -634,6 +660,7 @@ echo -e " - This tool does not check, if the memory.low value is set correctly.\
 eval $(grep ^ID= /etc/os-release)
 eval $(grep ^VERSION= /etc/os-release)
 PROD=""
+VERSION="15.2"
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
 case "${ID}${PROD}-${VERSION}" in
     sles4sap-15.2)
