@@ -660,7 +660,6 @@ echo -e " - This tool does not check, if the memory.low value is set correctly.\
 eval $(grep ^ID= /etc/os-release)
 eval $(grep ^VERSION= /etc/os-release)
 PROD=""
-VERSION="15.2"
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
 case "${ID}${PROD}-${VERSION}" in
     sles4sap-15.2)
