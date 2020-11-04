@@ -25,10 +25,16 @@
 #
 # Changelog:
 #
-# 12.10.2020  v1.0      First release.
-# 13.10.2020  v1.0.1    Added check of memory.low=max for SAP.slice children.
+# 12.10.2020  v1.0      First release
+# 13.10.2020  v1.0.1    Added check of memory.low=max for SAP.slice children
+# 03.11.2020  v1.0.2    Fixed wrong permissions in capture program test
+#                       Fixed OS version detection 
+#                       Fixed issues with MemoryLow test
+#                       Fixed issues with profile detection
+#                       Fixed issue with cgroup detection  
+#                       Added cgroup v1 detection
 
-version="1.0.1"
+version="1.0.2"
 
 # We use these global arrays through out the program:
 #
@@ -103,6 +109,7 @@ function get_cgroup_state() {
     # Exitcode: -
     #
     # Determines if cgroup2 unified hierarchy is configured and active.
+    # It also checks for remaining cgroup v1 controllers.
     #
     # The function updates the associative array "cgroup_unified".
     #
@@ -117,6 +124,11 @@ function get_cgroup_state() {
         cgroup_unified['active']='yes'
     else
         cgroup_unified['active']='no'
+    fi
+    if cut -d ' ' -f 3 /proc/mounts | grep -q '^cgroup$' ; then
+        cgroup_unified['v1-controllers']=$(grep ' cgroup ' /proc/mounts | cut -d ' ' -f 4 | tr ',' '\n' | sort -u | egrep '^(cpu|cpuacct|cpuset|memory|devices|freezer|net_cls|blkio|perf_event|net_prio|hugetlb|pids|rdma)$' | tr '\n' ' ')  # not very beautiful...
+    else
+        cgroup_unified['v1-controllers']='no'
     fi
 }
 
@@ -157,7 +169,7 @@ function get_SAP_profile_data() {
     capture_pattern="^[[:space:]]*Execute_[[:digit:]]+[[:space:]]*=[[:space:]]*local[[:space:]]+${capture_state['name']}"
 
     for path in /usr/sap/*/SYS/profile/* ; do 
-        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_[[:alnum:]]+$ ]] || continue
+        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_.*$ ]] || continue
         profile="${path##*/}"
         SAP_profile_path["${profile}"]="${path}"
         SAP_profile_wmp_entry["${profile}"]=$(egrep "${capture_pattern}" "${path}")
@@ -262,7 +274,7 @@ function get_SAP_process_data() {
         [[ "${comm}" =~ ^sapstart(|srv)$ ]] && sapstart_pids[${pid}]="${pid}"
     done
 
-    # Go through all pids and walk back through its parents. and identify children of sapstart/sapstartsrv.
+    # Go through all pids and walk back through it's parents. and identify children of sapstart/sapstartsrv.
     sapstart_list=" ${!sapstart_pids[@]} "  # all sapstart/sapstartsrv processes as string (leading and trailling spaces are important!) 
     for pid in "${!proc_ppid[@]}" ; do
         parent=${proc_ppid[${pid}]}
@@ -287,14 +299,12 @@ function get_SAP_process_data() {
         #echo "${profile_name}: ${SAP_instance_processes[${profile_name}]}"
     done
 
-    # Collect all intance processes which are not in SAP.slice
+    # Collect all instance processes which are not in SAP.slice.
     for instance in "${!SAP_instance_processes[@]}" ; do
         #echo "$instance:"
         for pid in ${SAP_instance_processes[${instance}]} ; do 
             [ -e "/proc/${pid}/cgroup" ] || continue
-            cgroup=$(< "/proc/${pid}/cgroup")
-            #echo "  ${pid} ${proc_comm[${pid}]} ${cgroup}"
-            [[ "${cgroup}" =~ ^0::/SAP.slice/ ]] || SAP_processes_outside_cgroup[${instance}]="${SAP_processes_outside_cgroup[${instance}]} ${pid}"
+            grep -q '^0::/SAP.slice/' "/proc/${pid}/cgroup" || SAP_processes_outside_cgroup[${instance}]="${SAP_processes_outside_cgroup[${instance}]} ${pid}"
         done
     done
 
@@ -395,6 +405,7 @@ function check_wmp() {
     #
     # - sap_wmp package should be installed
     # - cgroups2 have to be active and enabled via GRUB 
+    # - cgroup v1 controllers should not be active
     # - capture program has to have the correct ownership and permissions
     # - Instance profile has been altered 
     # - Instance processes are in SAP.slice
@@ -403,7 +414,7 @@ function check_wmp() {
     # - Timer unit to monitor cgroup data has been set.
 
 
-    local fails=0 warnings=0 tuned_used version_tag               SAPTUNE_VERSION TUNE_FOR_SOLUTIONS TUNE_FOR_NOTES
+    local fails=0 warnings=0 tuned_used version_tag page_size
 
     # We can stop, if sapwmp is not installed.
     if [ -z "${package_version['sapwmp']}" ] ; then
@@ -437,6 +448,21 @@ function check_wmp() {
             ;;
     esac
 
+
+    # No cgroup v1 controller should be active.
+    case "${cgroup_unified['v1-controllers']}" in 
+        no)
+            print_ok "No cgroup1 controllers mounted."
+            ;;
+        *memory*)
+            print_fail "The cgroup1 memory controller has been found, which is not supported with WMP!" "Please configure your system according to the documentation." 
+            ((fails++))
+            ;;    
+        *) 
+            print_warn "The following cgroup1 controllers have been found: ${cgroup_unified['v1-controllers']}. Verify that they do not interfere with WMP."
+            ;;
+    esac
+
     # The capture program has to be have the permissions of 6750 and the ownership of root:sapsys
     case "${capture_state['exists']}" in 
         yes)
@@ -446,7 +472,7 @@ function check_wmp() {
                     ;;
                 *)
                     case "${capture_state['permissions']}" in 
-                        6750)   
+                        4750)   
                             ;;
                         *)
                             print_fail "capture program has wrong permissions of ${capture_state['permissions']}!" "Reinstall the sapwmp package or change the permissions of ${capture_state['name']} to 6750."
@@ -514,7 +540,8 @@ function check_wmp() {
                             ((fails++))
                             ;;    
                         *)
-                            if [ "${SAP_slice_data['MemoryLow']}" == "${SAP_slice_data['memory.low']}" ] ; then
+                            page_size=$(getconf PAGE_SIZE)
+                            if [ $(( ${SAP_slice_data['MemoryLow']:-0} / ${page_size} )) -eq $(( ${SAP_slice_data['memory.low']:-0} / ${page_size} )) ] ; then
                                 print_ok "MemoryLow is set and in use."
                             else
                                 print_fail "The cgroup ${SAP_slice_data['name']} has a different value for memory.low (${SAP_slice_data['memory.low']}) as configured for MemoryLow (${SAP_slice_data['MemoryLow']})" "Only the configuration file or the runtime value has been changed!"
@@ -574,21 +601,26 @@ function check_wmp() {
     fi
 
     # Check if MemoryLow of the SAP slice is lower the memory.current and less then 3% as physical memory.
-    if [ ${SAP_slice_data['MemoryLow']} -gt ${SAP_slice_data['memory.current']} ] ; then 
-        print_ok "MemoryLow is not larger then the current allocated memory for ${SAP_slice_data['name']}."
-    else
-        print_fail "MemoryLow (${SAP_slice_data['MemoryLow']}) is larger then the current allocated memory (${SAP_slice_data['memory.current']}) for ${SAP_slice_data['name']}!" "Check if this is an expected situation."
-        ((fails++))
-    fi
-    if [ ${SAP_slice_data['MemoryLow']} -lt ${memory_info['MemTotal']} ] ; then
-        print_ok "MemoryLow of ${SAP_slice_data['name']} is less then total memory."
-        memory_low_thresh=$(( ${memory_info['MemTotal']} * 97 / 100 ))
-        if [ ${SAP_slice_data['MemoryLow']} -gt ${memory_low_thresh} ] ; then
-            print_warn "MemoryLow of ${SAP_slice_data['name']} (${SAP_slice_data['MemoryLow']}) is very close to the total physical memory (${memory_info['MemTotal']})!"
-            ((warnings++))
+    if [ -n "${SAP_slice_data['MemoryLow']}" ] ; then
+        if [ ${SAP_slice_data['MemoryLow']} -gt ${SAP_slice_data['memory.current']} ] ; then 
+            print_ok "MemoryLow is larger then the current allocated memory for ${SAP_slice_data['name']}."
+        else
+            print_fail "MemoryLow (${SAP_slice_data['MemoryLow']}) is smaller then the current allocated memory (${SAP_slice_data['memory.current']}) for ${SAP_slice_data['name']}!" "Check if this is an expected situation."
+            ((fails++))
+        fi
+        if [ ${SAP_slice_data['MemoryLow']} -lt ${memory_info['MemTotal']} ] ; then
+            print_ok "MemoryLow of ${SAP_slice_data['name']} is less then total memory."
+            memory_low_thresh=$(( ${memory_info['MemTotal']} * 97 / 100 ))
+            if [ ${SAP_slice_data['MemoryLow']} -gt ${memory_low_thresh} ] ; then
+                print_warn "MemoryLow of ${SAP_slice_data['name']} (${SAP_slice_data['MemoryLow']}) is very close to the total physical memory (${memory_info['MemTotal']})!"
+                ((warnings++))
+            fi
+        else
+            print_fail "MemoryLow of ${SAP_slice_data['name']} (${SAP_slice_data['MemoryLow']}) is not less then the total physical memory (${memory_info['MemTotal']})!" "Reduce MemoryLow."
+            ((fails++))
         fi
     else
-        print_fail "MemoryLow of ${SAP_slice_data['name']} (${SAP_slice_data['MemoryLow']}) is not less then the total physical memory (${memory_info['MemTotal']})!" "Reduce MemoryLow."
+        print_fail "MemoryLow of ${SAP_slice_data['name']} is not configured!" "Configure MemoryLow."
         ((fails++))
     fi
 
@@ -660,11 +692,18 @@ echo -e " - This tool does not check, if the memory.low value is set correctly.\
 eval $(grep ^ID= /etc/os-release)
 eval $(grep ^VERSION= /etc/os-release)
 PROD=""
+
+##############################
+VERSION=15-SP2  
+ID=sles
+PROD=4sap
+##############################
+
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
-case "${ID}${PROD}-${VERSION}" in
-    sles4sap-15.2)
+case "${ID}${PROD}-${VERSION-ID}" in
+    sles4sap-15-SP2)
         ;;
-    sles4sap-15|sles4sap-15.1)
+    sles4sap-15|sles4sap-15-SP1)
         echo "Only SLES for SAP Applications 15 SP2 is supported yet! Support for ${VERSION} will follow soon. Exiting."
         exit 2
         ;;

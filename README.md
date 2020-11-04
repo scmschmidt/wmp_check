@@ -93,6 +93,41 @@ Please keep in mind:
 WMP will not work properly!
 ```
 
+WMP has been setup correctly for all three existent SAP instances, but there is a warning about 
+MemoryLow which *might* be to high and leaves to less memory for the rest of the system:
+
+```
+# ./wmp_check 
+
+This is wmp_check v0.1.
+It verifies if WMP is set up correctly.
+
+Please keep in mind:
+ - It does not check if you have the latest version installed.
+ - It assumes SAP instances profiles can be found beneath /usr/sap/<SID>/SYS/profile/.
+ - This tool does not check, if the memory.low value is set correctly.
+
+[ OK ]  cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub.
+[ OK ]  capture program has correct ownership and permissions.
+[NOTE]  WMP entry for the WMP capture program found for instance HA0_ASCS00_sapha0as.
+[NOTE]  WMP entry for the WMP capture program found for instance HA0_D01_sapha0ci.
+[NOTE]  WMP entry for the WMP capture program found for instance HA0_ERS10_sapha0er.
+[ OK ]  All SAP instances contain the entry for the WMP capture program.
+[ OK ]  SAP slice is active.
+[ OK ]  MemoryLow is set and in use.
+[NOTE]  All processes of HA0_ASCS00_sapha0as are in SAP.slice.
+[NOTE]  All processes of HA0_D01_sapha0ci are in SAP.slice.
+[NOTE]  All processes of HA0_ERS10_sapha0er are in SAP.slice.
+[ OK ]  All SAP instance processes are inside SAP.slice.
+[ OK ]  MemoryLow is not larger then the current allocated memory for SAP.slice.
+[WARN]  MemoryLow of SAP.slice (15498389487) is very close to the total physical memory (15977289039)!
+[NOTE]  The timer unit wmp-sample-memory.timer to collect monitor data is active.
+[NOTE]  The optional timer unit wmp-sample-memory.timer to collect monitor data is enabled.
+[NOTE]  Optional swap accounting is active and can be monitored.
+[NOTE]  Optional swap accounting is configured in /etc/default/grub.
+
+WMP is set up correctly. 
+```
 
 
 ## Exit Codes
@@ -108,5 +143,11 @@ WMP will not work properly!
 
 |    date    | version  | comment                                               |
 |------------|----------|-------------------------------------------------------|
-| 12.10.2020 | v1.0     | First release.                                        |
-| 13.10.2020 | v1.0.1   | Added check of memory.low=max for SAP.slice children. |
+| 12.10.2020 | v1.0     | First release                                         |
+| 13.10.2020 | v1.0.1   | Added check of memory.low=max for SAP.slice children  |
+| 03.11.2020 | v1.0.2   | Fixed wrong permissions in capture program test       |
+|            |          | Fixed OS version detection                            |
+|            |          | Fixed issues with MemoryLow test                      |
+|            |          | Fixed issues with profile detection                   |
+|            |          | Fixed issue with cgroup detection                     |
+|            |          | Added cgroup v1 detection                             |
