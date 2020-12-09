@@ -33,8 +33,9 @@
 #                       Fixed issues with profile detection
 #                       Fixed issue with cgroup detection  
 #                       Added cgroup v1 detection
+# 09.12.2020  v1.0.3    Optimized pattern for profile detection
 
-version="1.0.2"
+version="1.0.3"
 
 # We use these global arrays through out the program:
 #
@@ -169,7 +170,7 @@ function get_SAP_profile_data() {
     capture_pattern="^[[:space:]]*Execute_[[:digit:]]+[[:space:]]*=[[:space:]]*local[[:space:]]+${capture_state['name']}"
 
     for path in /usr/sap/*/SYS/profile/* ; do 
-        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_.*$ ]] || continue
+        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_[[:alnum:]]+$ ]] || continue
         profile="${path##*/}"
         SAP_profile_path["${profile}"]="${path}"
         SAP_profile_wmp_entry["${profile}"]=$(egrep "${capture_pattern}" "${path}")

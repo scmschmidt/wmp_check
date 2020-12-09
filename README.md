@@ -151,3 +151,4 @@ WMP is set up correctly.
 |            |          | Fixed issues with profile detection                   |
 |            |          | Fixed issue with cgroup detection                     |
 |            |          | Added cgroup v1 detection                             |
+| 09.12.2020 | v1.0.3   | Optimized pattern for profile detection               |
