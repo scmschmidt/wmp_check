@@ -34,8 +34,9 @@
 #                       Fixed issue with cgroup detection  
 #                       Added cgroup v1 detection
 # 09.12.2020  v1.0.3    Optimized pattern for profile detection
+# 14.12.2020  v1.0.4    cgroup2 mount detection fixed
 
-version="1.0.3"
+version="1.0.4"
 
 # We use these global arrays through out the program:
 #
@@ -121,7 +122,7 @@ function get_cgroup_state() {
     else
         cgroup_unified['configured']='no'
     fi
-    if grep -q '^cgroup /sys/fs/cgroup cgroup2' /proc/mounts ; then
+    if egrep -q '^cgroup.? /sys/fs/cgroup cgroup2' /proc/mounts ; then
         cgroup_unified['active']='yes'
     else
         cgroup_unified['active']='no'
