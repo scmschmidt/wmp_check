@@ -34,25 +34,32 @@
 #                       Fixed issue with cgroup detection  
 #                       Added cgroup v1 detection
 # 09.12.2020  v1.0.3    Optimized pattern for profile detection
-# 14.12.2020  v1.0.4    cgroup2 mount detection fixed
+# 14.12.2020  v1.1.0    cgroup2 mount detection fixed
+#                       Further optimized pattern for profile detection  
+#                       Detection of SAP instances reworked a bit
 
-version="1.0.4"
+version="1.1.0"
 
 # We use these global arrays through out the program:
 #
-# package_version               -  contains package version (string)
-# cgroup_unified                -  contains if unified cgroup hierarchy is configured and active
-# capture_state                 -  contains permission and ownership of the capturer program
-# SAP_profile_path              -  contains profile path of SAP instances 
-# SAP_profile_wmp_entry         -  contains WMP entry in SAP profiles
-# memory_info                   -  contains system memory information 
-# SAP_slice_data                -  contains information about SAP.slice
-# SAP_instance_processes        -  contains pids of that instance
-# SAP_processes_outside_cgroup  -  contains pids of that instance which are not in SAP.slice
-# unit_state_active             -  contains systemd unit state (systemctl is-active) 
-# unit_state_enabled            -  contains systemd unit state (systemctl is-enabled) 
-# swapaccounting_state          -  contains if cgroup swap accounting is configured and active
-declare -A package_version cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+# package_version                -  contains package version (string)
+# cgroup_unified                 -  contains if unified cgroup hierarchy is configured and active
+# capture_state                  -  contains permission and ownership of the capturer program
+# SAP_profile_path               -  contains profile path of SAP instances 
+# SAP_profile_wmp_entry          -  contains WMP entry in SAP profiles
+# memory_info                    -  contains system memory information 
+# SAP_slice_data                 -  contains information about SAP.slice
+# SAP_instance_processes         -  contains pids of that instance
+# SAP_processes_outside_cgroup   -  contains pids of that instance which are not in SAP.slice
+# SAP_sapstartsrv_outside_cgroup -  contains flag per instance if only sapstartsrv processes are outside the cgroup
+# unit_state_active              -  contains systemd unit state (systemctl is-active) 
+# unit_state_enabled             -  contains systemd unit state (systemctl is-enabled) 
+# swapaccounting_state           -  contains if cgroup swap accounting is configured and active
+declare -A package_version cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup SAP_sapstartsrv_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+
+# Some counters.
+SAP_processes=0
+SAP_processes_outside=0
 
 
 function header() { 
@@ -171,7 +178,7 @@ function get_SAP_profile_data() {
     capture_pattern="^[[:space:]]*Execute_[[:digit:]]+[[:space:]]*=[[:space:]]*local[[:space:]]+${capture_state['name']}"
 
     for path in /usr/sap/*/SYS/profile/* ; do 
-        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_[[:alnum:]]+$ ]] || continue
+        [[ "${path}" =~ /[[:alnum:]]+_[[:alnum:]]+_[[:alnum:]-]+$ ]] || continue
         profile="${path##*/}"
         SAP_profile_path["${profile}"]="${path}"
         SAP_profile_wmp_entry["${profile}"]=$(egrep "${capture_pattern}" "${path}")
@@ -254,12 +261,13 @@ function get_SAP_process_data() {
     #
     # Determines all processes of SAP instances and the ones outside SAP.slice.
     #
-    # The function updates the associative arrays "SAP_instance_processes" and "SAP_processes_outside_cgroup".
+    # The function updates the associative arrays "SAP_instance_processes" and "SAP_processes_outside_cgroup" and "SAP_sapstartsrv_outside_cgroup"
+    # as well as the variables "SAP_processes" and "SAP_processes_outside".
     #
     # Requires: -
 
-    local pd line pid comm state ppid proc_ppid proc_comm sapstart_pids parent sapstart_list tmp_pid cmdline component profile_name instance cgroup
-    declare -A proc_ppid proc_comm sapstart_pids
+    local pd line pid comm state ppid proc_ppid proc_comm sapstart_pids parent sapstart_list tmp_pid cmdline component profile_name instance cgroup sapstartsrv_proc no_sapstartsrv_proc 
+    declare -A proc_ppid proc_comm sapstart_pids 
 
     # Collect current process information and create a list of sapstart/sapstartsrv processes.
     for pd in /proc/[0-9]*/stat ; do 
@@ -298,16 +306,31 @@ function get_SAP_process_data() {
         [ "${profile_name}" == 'host_profile' ] && continue  # HostAgent is not covered by WMP 
 
         SAP_instance_processes[${profile_name}]="${SAP_instance_processes[${profile_name}]} ${sapstart_pids[${pid}]}"
-        #echo "${profile_name}: ${SAP_instance_processes[${profile_name}]}"
     done
 
     # Collect all instance processes which are not in SAP.slice.
+    SAP_processes=0
     for instance in "${!SAP_instance_processes[@]}" ; do
-        #echo "$instance:"
-        for pid in ${SAP_instance_processes[${instance}]} ; do 
+        sapstartsrv_proc=0
+        no_sapstartsrv_proc=0
+	SAP_sapstartsrv_outside_cgroup[${instance}]=0
+        for pid in ${SAP_instance_processes[${instance}]} ; do
+	    ((SAP_processes++))
             [ -e "/proc/${pid}/cgroup" ] || continue
-            grep -q '^0::/SAP.slice/' "/proc/${pid}/cgroup" || SAP_processes_outside_cgroup[${instance}]="${SAP_processes_outside_cgroup[${instance}]} ${pid}"
+            if ! grep -q '^0::/SAP.slice/' "/proc/${pid}/cgroup" ; then 
+		SAP_processes_outside_cgroup[${instance}]="${SAP_processes_outside_cgroup[${instance}]} ${pid}"
+		((SAP_processes_outside++))
+		if [ "${proc_comm[${pid}]}" = "sapstartsrv" ] ; then 
+                    ((sapstartsrv_proc++))
+		else
+		    ((no_sapstartsrv_proc++)) 
+		fi
+
+	    fi
         done
+        if [ ${sapstartsrv_proc} -gt 0 -a  ${no_sapstartsrv_proc} -eq 0 ] ; then
+	    SAP_sapstartsrv_outside_cgroup[${instance}]=1
+	fi 
     done
 
 }
@@ -571,36 +594,28 @@ function check_wmp() {
     esac
 
     # All instance processes must be in SAP.slice.
-    if [ ${#SAP_instance_processes[@]} -eq 0 ] ; then
+    if [ ${SAP_processes} -eq 0 ] ; then
         print_fail "No SAP instance processes found!" "Please start the SAP system."
         ((fails++))
     else
-        counter=0
         for instance in "${!SAP_instance_processes[@]}" ; do
             case "${SAP_processes_outside_cgroup[${instance}]}" in 
                 '')
-                    print_note "All processes of ${instance} are in SAP.slice."
-                    ((counter++))
+                    print_ok "All processes of ${instance} are in SAP.slice."
                     ;;
                 *)
-                    print_note "Instance ${instance} has processes outside SAP.slice:${SAP_processes_outside_cgroup[${instance}]}."
+		    if [ ${SAP_sapstartsrv_outside_cgroup[${instance}]} -eq 1 ] ; then
+	    	        print_warn "Only sapstartsrv processes of ${instance} are outside SAP.slice!" "This is a special case and can be expected. Check documentation for details."
+			((warning++))
+		    else
+                        print_fail "Instance ${instance} has processes outside SAP.slice:${SAP_processes_outside_cgroup[${instance}]}."
+			((fails++))
+		    fi 	 
                     ;;
             esac
         done
-        case "${counter}" in 
-            0)
-                print_fail "All SAP instances are outside SAP.slice!" "Check your configuration and restart the instance."
-                ((fails++))
-                ;;
-            ${#SAP_instance_processes[@]})
-                print_ok "All SAP instance processes are inside SAP.slice."
-                ;;
-            *)
-                print_warn "Only part of the SAP instances processes are inside SAP.slice!" "Check your configuration and restart the instance."
-                ((warnings++))
-                ;;
-        esac 
-    fi
+     fi	
+
 
     # Check if MemoryLow of the SAP slice is lower the memory.current and less then 3% as physical memory.
     if [ -n "${SAP_slice_data['MemoryLow']}" ] ; then
@@ -695,12 +710,6 @@ eval $(grep ^ID= /etc/os-release)
 eval $(grep ^VERSION= /etc/os-release)
 PROD=""
 
-##############################
-VERSION=15-SP2  
-ID=sles
-PROD=4sap
-##############################
-
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
 case "${ID}${PROD}-${VERSION-ID}" in
     sles4sap-15-SP2)
@@ -728,3 +737,4 @@ esac
 
 # Bye.
 exit 0
+

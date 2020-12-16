@@ -152,4 +152,6 @@ WMP is set up correctly.
 |            |          | Fixed issue with cgroup detection                     |
 |            |          | Added cgroup v1 detection                             |
 | 09.12.2020 | v1.0.3   | Optimized pattern for profile detection               |
-| 14.12.2020 | v1.0.4   | cgroup2 mount detection fixed                         |
+| 14.12.2020 | v1.1.0   | cgroup2 mount detection fixed                         |
+|            |          | Further optimized pattern for profile detection       |
+|            |		| Detection of SAP instances reworked a bit             |
