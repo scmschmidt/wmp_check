@@ -61,6 +61,12 @@ declare -A package_version cgroup_unified capture_state memory_info SAP_profile_
 SAP_processes=0
 SAP_processes_outside=0
 
+# Colorful output.
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+GRAY='\033[0;37m'
+RESET='\033[0m'
 
 function header() { 
     local len=${#1}
@@ -71,23 +77,23 @@ function header() {
 
 function print_ok() {
     local text="  ${@}"
-    echo -e "[ OK ]${text}"
+    echo -e "[ ${GREEN}OK${RESET} ]${text}"
 }
 
 function print_fail() {
     local text="${1}"
     local hint="${2}"
-    echo -e "[FAIL]  ${text}\n        -> ${hint}"
+    echo -e "[${RED}FAIL${RESET}]  ${text}\n        -> ${hint}"
 }
 
 function print_warn() {
     local text="  ${@}"
-    echo -e "[WARN]${text}"
+    echo -e "[${YELLOW}WARN${RESET}]${text}"
 }
 
 function print_note() {
     local text="  ${@}"
-    echo -e "[NOTE]${text}"
+    echo -e "[${GRAY}NOTE${RESET}]${text}"
 }
 
 function get_package_versions() {
@@ -679,8 +685,8 @@ function check_wmp() {
 
     # Summary.
     echo
-    [ ${warnings} -gt 0 ] && echo "${warnings} warning(s) have been found."
-    [ ${fails} -gt 0 ] && echo "${fails} error(s) have been found."
+    [ ${warnings} -gt 0 ] && echo -e "${YELLOW}${warnings} warning(s)${RESET} have been found."
+    [ ${fails} -gt 0 ] && echo -e "${RED}${fails} error(s)${RESET} have been found."
     if [ ${fails} -gt 0 ] ; then
         echo "WMP will not work properly!"
         return 1
