@@ -131,7 +131,11 @@ function get_cgroup_state() {
     # Requires: -
 
     if [[ $(grep 'GRUB_CMDLINE_LINUX_DEFAULT' /etc/default/grub) =~ systemd.unified_cgroup_hierarchy=(1|true|yes) ]] ; then
-        cgroup_unified['configured']='yes'
+        if [[ $(grep '[[:space:]]linux[[:space:]]' /boot/grub2/grub.cfg) =~ systemd.unified_cgroup_hierarchy=(1|true|yes) ]] ; then
+            cgroup_unified['configured']='yes'
+        else
+            cgroup_unified['configured']='needupdate'
+        fi
     else
         cgroup_unified['configured']='no'
     fi
@@ -460,6 +464,9 @@ function check_wmp() {
                 yes)
                     print_ok "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub."
                     ;;
+                needupdate)
+                    print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub, but not updated." "Please run 'grub2-mkconfig -o /boot/grub2/grub.cfg' to update"
+                    ;;
                 no)
                     print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup, but not configured in /etc/default/grub." "Please rewrite the bootloader and reboot."
                     ((fails++))
@@ -470,6 +477,9 @@ function check_wmp() {
             case "${cgroup_unified['configured']}" in 
                 yes)
                     print_fail "cgroup2 unified hierarchy is configured in /etc/default/grub, but not active!" "Please rewrite the bootloader and reboot."    
+                    ;;
+                needupdate)
+                    print_fail "cgroup2 unified hierarchy is configured in /etc/default/grub, but not updated and active!" "Please rewrite the bootloader, run 'grub2-mkconfig -o /boot/grub2/grub.cfg' and reboot."
                     ;;
                 no)
                     print_fail "cgroup2 unified hierarchy is not configured!" "Please add 'systemd.unified_cgroup_hierarchy=true' to GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub, rewrite the bootloader and reboot."    
