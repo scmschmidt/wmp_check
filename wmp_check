@@ -42,7 +42,7 @@
 #                       Enable support for SLE15SP0/SP1
 #                       Support RPM package version check
 
-version="1.1.0"
+version="1.1.1"
 
 # We use these global arrays through out the program:
 #
@@ -784,14 +784,13 @@ PROD=""
 
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
 case "${ID}${PROD}-${VERSION-ID}" in
-    sles4sap-15-SP2)
+    sles4sap-15|sles4sap-15-SP1|sles4sap-15-SP2)
         ;;
-    sles4sap-15|sles4sap-15-SP1)
-        echo "Only SLES for SAP Applications 15 SP2 is supported yet! Support for ${VERSION} will follow soon. Exiting."
-        exit 2
+    sles4sap-15-SP3)
+        echo "Only SLES for SAP Applications 15 SP0/SP1/SP2 are supported yet! Support for ${VERSION} will follow soon. Exiting."
         ;;
     *)
-        echo "Only SLES for SAP Applications 15 SP2 is supported! Your OS is ${ID}${PROD}-${VERSION}. Exiting."
+        echo "Only SLES for SAP Applications 15 SP0/SP1/SP2 are supported! Your OS is ${ID}${PROD}-${VERSION}. Exiting."
         exit 2
         ;;
 esac

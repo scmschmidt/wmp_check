@@ -154,4 +154,8 @@ WMP is set up correctly.
 | 09.12.2020 | v1.0.3   | Optimized pattern for profile detection               |
 | 14.12.2020 | v1.1.0   | cgroup2 mount detection fixed                         |
 |            |          | Further optimized pattern for profile detection       |
-|            |		| Detection of SAP instances reworked a bit             |
+|            |          | Detection of SAP instances reworked a bit             |
+| 09.04.2021 | v1.1.1   | Add colorful output                                   |
+|                       | Check generated grub2 configure                       |
+|                       | Enable support for SLE15SP0/SP1                       |
+|                       | Support RPM package version check                     |
