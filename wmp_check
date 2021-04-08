@@ -37,6 +37,10 @@
 # 14.12.2020  v1.1.0    cgroup2 mount detection fixed
 #                       Further optimized pattern for profile detection  
 #                       Detection of SAP instances reworked a bit
+# 09.04.2021  v1.1.1    Add colorful output
+#                       Check generated grub2 configure
+#                       Enable support for SLE15SP0/SP1
+#                       Support RPM package version check
 
 version="1.1.0"
 
@@ -55,7 +59,17 @@ version="1.1.0"
 # unit_state_active              -  contains systemd unit state (systemctl is-active) 
 # unit_state_enabled             -  contains systemd unit state (systemctl is-enabled) 
 # swapaccounting_state           -  contains if cgroup swap accounting is configured and active
-declare -A package_version cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup SAP_sapstartsrv_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+declare -A package_version required_pkgs cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup SAP_sapstartsrv_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+
+# Required packages list
+# examples:
+#		[{name}]="{version}-{release}"
+#		[{name}]="{version}"
+#		[{name}]=""
+required_pkgs=(
+    [sapwmp]=""
+    [systemd]="234-24.67.1"
+)
 
 # Some counters.
 SAP_processes=0
@@ -96,6 +110,17 @@ function print_note() {
     echo -e "[${GRAY}NOTE${RESET}]${text}"
 }
 
+function version_lt() {
+    # Params:   VERSION1 VERSION2
+    # Output:   -
+    # Exitcode: boolean result
+    #
+    # Compare the two RPM package version
+	#
+    # Requires: -
+    test "$(echo "$@" | tr " " "\n" | sort -rV | head -n 1)" != "$1";
+}
+
 function get_package_versions() {
     # Params:   PACKAGE...
     # Output:   -
@@ -108,10 +133,14 @@ function get_package_versions() {
     #
     # Requires:-
 
-    local package version
+    local package version release
     for package in "${@}" ; do
         if version=$(rpm -q --qf '%{version}' "${package}" 2>&1) ; then
-            package_version["${package}"]=${version}
+            if release=$(rpm -q --qf '%{release}' "${package}" 2>&1) ; then
+                package_version["${package}"]=${version}-${release}
+            else
+                package_version["${package}"]=${version}
+            fi
         else
             package_version["${package}"]=''
         fi
@@ -389,6 +418,33 @@ function get_swapaccounting_state() {
     fi
 }
 
+function check_pkg_version () {
+    # Params:   -
+    # Output:   -
+    # Exitcode: 2 if packages not installed properly
+    #
+    # Checks if required packages are installed correctly.
+    #
+    # Requires: -
+    local err_msg=""
+
+    for key in $(echo ${!required_pkgs[*]})
+    do
+        [[ -z ${package_version[$key]} ]] && err_msg=${err_msg}"Package '$key' not installed.\n" && continue
+
+        [[ -z ${required_pkgs[$key]} ]] && continue
+
+        if version_lt ${package_version[$key]} ${required_pkgs[$key]}; then
+            err_msg=${err_msg}"Package '$key(${package_version[$key]})' need upgrade to at least '$key(${required_pkgs[$key]})'.\n"
+        fi
+    done
+
+    if [ ! -z "$err_msg" ]; then
+        print_fail "$err_msg" "Please use zypper to install/upgrade."
+        exit 2
+    fi
+}
+
 function collect_data() {
     # Params:   -
     # Output:   -
@@ -407,7 +463,10 @@ function collect_data() {
     #           get_swapaccounting_state()
 
     # Collect data about some packages.
-    get_package_versions sapwmp
+    for pkg in $(echo ${!required_pkgs[*]})
+    do
+        get_package_versions $pkg
+    done
 
     # Collect cgroup status.
     get_cgroup_state
@@ -451,11 +510,8 @@ function check_wmp() {
 
     local fails=0 warnings=0 tuned_used version_tag page_size
 
-    # We can stop, if sapwmp is not installed.
-    if [ -z "${package_version['sapwmp']}" ] ; then
-        echo "Package sapwmp is not installed! Please run: 'zypper install sapwmp'" 
-        return 2    
-    fi
+    # We can stop, if required packages are not installed properly.
+    check_pkg_version
 
     # Cgroup2 has to be configured and mounted in the unified hierarchy.
     case "${cgroup_unified['active']}" in
@@ -717,7 +773,7 @@ function check_wmp() {
 echo -e "\nThis is ${0##*/} v${version}."
 echo -e "It verifies if WMP is set up correctly.\n"
 echo -e "Please keep in mind:"
-echo -e " - It does not check if you have the latest version installed."
+echo -e " - It does not check if you have the latest version installed, only minimum version."
 echo -e " - It assumes SAP instances profiles can be found beneath /usr/sap/<SID>/SYS/profile/."
 echo -e " - This tool does not check, if the memory.low value is set correctly.\n"
 
