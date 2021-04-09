@@ -75,12 +75,20 @@ required_pkgs=(
 SAP_processes=0
 SAP_processes_outside=0
 
-# Colorful output.
+# Colorful output, set to 'false' to disable.
+# Disable color automatically if we run in a pipe
+ENABLE_COLORIZE=true
+[ -t 1 ] || ENABLE_COLORIZE=false
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 GRAY='\033[0;37m'
 RESET='\033[0m'
+
+if [[ $ENABLE_COLORIZE = false ]];then
+    unset RED GREEN YELLOW GRAY RESET
+fi
 
 function header() { 
     local len=${#1}
@@ -522,6 +530,7 @@ function check_wmp() {
                     ;;
                 needupdate)
                     print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub, but not updated." "Please run 'grub2-mkconfig -o /boot/grub2/grub.cfg' to update"
+                    ((fails++))
                     ;;
                 no)
                     print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup, but not configured in /etc/default/grub." "Please rewrite the bootloader and reboot."
