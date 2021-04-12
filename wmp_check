@@ -37,8 +37,12 @@
 # 14.12.2020  v1.1.0    cgroup2 mount detection fixed
 #                       Further optimized pattern for profile detection  
 #                       Detection of SAP instances reworked a bit
+# 09.04.2021  v1.1.1    Add colorful output
+#                       Check generated grub2 configure
+#                       Enable support for SLE15SP0/SP1
+#                       Support RPM package version check
 
-version="1.1.0"
+version="1.1.1"
 
 # We use these global arrays through out the program:
 #
@@ -55,12 +59,36 @@ version="1.1.0"
 # unit_state_active              -  contains systemd unit state (systemctl is-active) 
 # unit_state_enabled             -  contains systemd unit state (systemctl is-enabled) 
 # swapaccounting_state           -  contains if cgroup swap accounting is configured and active
-declare -A package_version cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup SAP_sapstartsrv_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+declare -A package_version required_pkgs cgroup_unified capture_state memory_info SAP_profile_path SAP_profile_wmp_entry SAP_slice_data SAP_instance_processes SAP_processes_outside_cgroup SAP_sapstartsrv_outside_cgroup unit_state_active unit_state_enabled swapaccounting_state
+
+# Required packages list
+# examples:
+#		[{name}]="{version}-{release}"
+#		[{name}]="{version}"
+#		[{name}]=""
+required_pkgs=(
+    [sapwmp]=""
+    [systemd]="234-24.67.1"
+)
 
 # Some counters.
 SAP_processes=0
 SAP_processes_outside=0
 
+# Colorful output, set to 'false' to disable.
+# Disable color automatically if we run in a pipe
+ENABLE_COLORIZE=true
+[ -t 1 ] || ENABLE_COLORIZE=false
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+GRAY='\033[0;37m'
+RESET='\033[0m'
+
+if [[ $ENABLE_COLORIZE = false ]];then
+    unset RED GREEN YELLOW GRAY RESET
+fi
 
 function header() { 
     local len=${#1}
@@ -71,23 +99,34 @@ function header() {
 
 function print_ok() {
     local text="  ${@}"
-    echo -e "[ OK ]${text}"
+    echo -e "[ ${GREEN}OK${RESET} ]${text}"
 }
 
 function print_fail() {
     local text="${1}"
     local hint="${2}"
-    echo -e "[FAIL]  ${text}\n        -> ${hint}"
+    echo -e "[${RED}FAIL${RESET}]  ${text}\n        -> ${hint}"
 }
 
 function print_warn() {
     local text="  ${@}"
-    echo -e "[WARN]${text}"
+    echo -e "[${YELLOW}WARN${RESET}]${text}"
 }
 
 function print_note() {
     local text="  ${@}"
-    echo -e "[NOTE]${text}"
+    echo -e "[${GRAY}NOTE${RESET}]${text}"
+}
+
+function version_lt() {
+    # Params:   VERSION1 VERSION2
+    # Output:   -
+    # Exitcode: boolean result
+    #
+    # Compare the two RPM package version
+	#
+    # Requires: -
+    test "$(echo "$@" | tr " " "\n" | sort -rV | head -n 1)" != "$1";
 }
 
 function get_package_versions() {
@@ -102,10 +141,14 @@ function get_package_versions() {
     #
     # Requires:-
 
-    local package version
+    local package version release
     for package in "${@}" ; do
         if version=$(rpm -q --qf '%{version}' "${package}" 2>&1) ; then
-            package_version["${package}"]=${version}
+            if release=$(rpm -q --qf '%{release}' "${package}" 2>&1) ; then
+                package_version["${package}"]=${version}-${release}
+            else
+                package_version["${package}"]=${version}
+            fi
         else
             package_version["${package}"]=''
         fi
@@ -125,7 +168,11 @@ function get_cgroup_state() {
     # Requires: -
 
     if [[ $(grep 'GRUB_CMDLINE_LINUX_DEFAULT' /etc/default/grub) =~ systemd.unified_cgroup_hierarchy=(1|true|yes) ]] ; then
-        cgroup_unified['configured']='yes'
+        if [[ $(grep '[[:space:]]linux[[:space:]]' /boot/grub2/grub.cfg) =~ systemd.unified_cgroup_hierarchy=(1|true|yes) ]] ; then
+            cgroup_unified['configured']='yes'
+        else
+            cgroup_unified['configured']='needupdate'
+        fi
     else
         cgroup_unified['configured']='no'
     fi
@@ -379,6 +426,33 @@ function get_swapaccounting_state() {
     fi
 }
 
+function check_pkg_version () {
+    # Params:   -
+    # Output:   -
+    # Exitcode: 2 if packages not installed properly
+    #
+    # Checks if required packages are installed correctly.
+    #
+    # Requires: -
+    local err_msg=""
+
+    for key in $(echo ${!required_pkgs[*]})
+    do
+        [[ -z ${package_version[$key]} ]] && err_msg=${err_msg}"Package '$key' not installed.\n" && continue
+
+        [[ -z ${required_pkgs[$key]} ]] && continue
+
+        if version_lt ${package_version[$key]} ${required_pkgs[$key]}; then
+            err_msg=${err_msg}"Package '$key(${package_version[$key]})' need upgrade to at least '$key(${required_pkgs[$key]})'.\n"
+        fi
+    done
+
+    if [ ! -z "$err_msg" ]; then
+        print_fail "$err_msg" "Please use zypper to install/upgrade."
+        exit 2
+    fi
+}
+
 function collect_data() {
     # Params:   -
     # Output:   -
@@ -397,7 +471,10 @@ function collect_data() {
     #           get_swapaccounting_state()
 
     # Collect data about some packages.
-    get_package_versions sapwmp
+    for pkg in $(echo ${!required_pkgs[*]})
+    do
+        get_package_versions $pkg
+    done
 
     # Collect cgroup status.
     get_cgroup_state
@@ -441,11 +518,8 @@ function check_wmp() {
 
     local fails=0 warnings=0 tuned_used version_tag page_size
 
-    # We can stop, if sapwmp is not installed.
-    if [ -z "${package_version['sapwmp']}" ] ; then
-        echo "Package sapwmp is not installed! Please run: 'zypper install sapwmp'" 
-        return 2    
-    fi
+    # We can stop, if required packages are not installed properly.
+    check_pkg_version
 
     # Cgroup2 has to be configured and mounted in the unified hierarchy.
     case "${cgroup_unified['active']}" in
@@ -453,6 +527,10 @@ function check_wmp() {
             case "${cgroup_unified['configured']}" in
                 yes)
                     print_ok "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub."
+                    ;;
+                needupdate)
+                    print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup and configured in /etc/default/grub, but not updated." "Please run 'grub2-mkconfig -o /boot/grub2/grub.cfg' to update"
+                    ((fails++))
                     ;;
                 no)
                     print_fail "cgroup2 unified hierarchy is mounted to /sys/fs/cgroup, but not configured in /etc/default/grub." "Please rewrite the bootloader and reboot."
@@ -464,6 +542,9 @@ function check_wmp() {
             case "${cgroup_unified['configured']}" in 
                 yes)
                     print_fail "cgroup2 unified hierarchy is configured in /etc/default/grub, but not active!" "Please rewrite the bootloader and reboot."    
+                    ;;
+                needupdate)
+                    print_fail "cgroup2 unified hierarchy is configured in /etc/default/grub, but not updated and active!" "Please rewrite the bootloader, run 'grub2-mkconfig -o /boot/grub2/grub.cfg' and reboot."
                     ;;
                 no)
                     print_fail "cgroup2 unified hierarchy is not configured!" "Please add 'systemd.unified_cgroup_hierarchy=true' to GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub, rewrite the bootloader and reboot."    
@@ -679,8 +760,8 @@ function check_wmp() {
 
     # Summary.
     echo
-    [ ${warnings} -gt 0 ] && echo "${warnings} warning(s) have been found."
-    [ ${fails} -gt 0 ] && echo "${fails} error(s) have been found."
+    [ ${warnings} -gt 0 ] && echo -e "${YELLOW}${warnings} warning(s)${RESET} have been found."
+    [ ${fails} -gt 0 ] && echo -e "${RED}${fails} error(s)${RESET} have been found."
     if [ ${fails} -gt 0 ] ; then
         echo "WMP will not work properly!"
         return 1
@@ -701,7 +782,7 @@ function check_wmp() {
 echo -e "\nThis is ${0##*/} v${version}."
 echo -e "It verifies if WMP is set up correctly.\n"
 echo -e "Please keep in mind:"
-echo -e " - It does not check if you have the latest version installed."
+echo -e " - It does not check if you have the latest version installed, only minimum version."
 echo -e " - It assumes SAP instances profiles can be found beneath /usr/sap/<SID>/SYS/profile/."
 echo -e " - This tool does not check, if the memory.low value is set correctly.\n"
 
@@ -712,14 +793,13 @@ PROD=""
 
 [ -f "/etc/products.d/SLES_SAP.prod" ] && PROD="4sap"
 case "${ID}${PROD}-${VERSION-ID}" in
-    sles4sap-15-SP2)
+    sles4sap-15|sles4sap-15-SP1|sles4sap-15-SP2)
         ;;
-    sles4sap-15|sles4sap-15-SP1)
-        echo "Only SLES for SAP Applications 15 SP2 is supported yet! Support for ${VERSION} will follow soon. Exiting."
-        exit 2
+    sles4sap-15-SP3)
+        echo "Only SLES for SAP Applications 15 SP0/SP1/SP2 are supported yet! Support for ${VERSION} will follow soon. Exiting."
         ;;
     *)
-        echo "Only SLES for SAP Applications 15 SP2 is supported! Your OS is ${ID}${PROD}-${VERSION}. Exiting."
+        echo "Only SLES for SAP Applications 15 SP0/SP1/SP2 are supported! Your OS is ${ID}${PROD}-${VERSION}. Exiting."
         exit 2
         ;;
 esac
