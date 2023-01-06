@@ -1,5 +1,7 @@
 # wmp_check
 
+**Please use `wmp-check` from the `sapwmp` package (SLES for SAP Applications) on production systems!**
+
 This script checks the setup of Workload Memory Protection.
 
 - Correct setup of cgroup2
@@ -156,6 +158,12 @@ WMP is set up correctly.
 |            |          | Further optimized pattern for profile detection       |
 |            |          | Detection of SAP instances reworked a bit             |
 | 09.04.2021 | v1.1.1   | Add colorful output                                   |
-|                       | Check generated grub2 configure                       |
-|                       | Enable support for SLE15SP0/SP1                       |
-|                       | Support RPM package version check                     |
+|            |          | Check generated grub2 configure                       |
+|            |          | Enable support for SLE15SP0/SP1                       |
+|            |          | Support RPM package version check                     |
+| 19.04.2021 | v1.1.2   | Remove sapstartsrv from process tree to capture       |
+|            |          | Enable support for SLE15SP3                           |
+| 11.01.2021 |          | Enable support for SLE15SP4                           |
+| 14.02.2022 | v1.1.3   | Adjust checker for SAP systemd integration            |
+| 06.01.2022 | v1.1.4   | Check existence of cgroup directory before reading    |
+|            |          | Allow to disable OS detection with `--skip-os-check`  | 
